@@ -1,0 +1,6 @@
+# the usage snapshot is local runtime state, not source
+usage-snapshot.json
+
+node_modules/
+.DS_Store
+Thumbs.db
