@@ -18,7 +18,9 @@ then quits. Schedule it shortly before your run window.
 Requirements: statusline.js active in your Claude settings, Claude logged in, and on
 Windows `pip install pywinpty`. Env: NIGHTCAP_SNAPSHOT (the snapshot path your status
 line writes, default ~/.claude/usage-snapshot.json), NIGHTCAP_PROJECT (dir to run
-Claude in, default the current directory).
+Claude in, default the current directory), NIGHTCAP_CLAUDE_BIN (override: full path to
+the Claude executable -- set this if auto-detect can't find it, e.g. when the npm-global
+bin shims are virtualized away from a scheduled task; see find_claude()).
 """
 import json
 import os
@@ -45,6 +47,24 @@ def read_snap():
 
 
 def find_claude():
+    # 1) explicit override -- the reliable escape hatch on any machine / OS.
+    env = os.environ.get('NIGHTCAP_CLAUDE_BIN')
+    if env and os.path.exists(env):
+        return env
+    # 2) On Windows, prefer the REAL native binary inside node_modules. The npm-global
+    #    bin shims (claude / claude.cmd / claude.ps1) can be written under a virtualized
+    #    or packaged context (e.g. launched from an MSIX terminal) and are then INVISIBLE
+    #    to a plain scheduled task -- it sees only node_modules in %APPDATA%\npm, so a
+    #    shim lookup returns "not found" and the task exits 2. The real binary is a
+    #    normal file the task can read.
+    if os.name == 'nt':
+        appdata = os.environ.get('APPDATA') or os.path.expanduser(r'~\AppData\Roaming')
+        real_exe = os.path.join(appdata, 'npm', 'node_modules', '@anthropic-ai',
+                                'claude-code', 'bin', 'claude.exe')
+        if os.path.exists(real_exe):
+            return real_exe
+    # 3) PATH / shim fallbacks (fine on non-virtualized installs, and on Unix where the
+    #    virtualization problem does not arise).
     c = shutil.which('claude') or shutil.which('claude.cmd')
     if c:
         return c
@@ -103,8 +123,10 @@ def main():
         print('scheduled-refresh: claude not found', file=sys.stderr)
         return 2
 
-    if os.name == 'nt':
-        argv = ['cmd.exe', '/c', claude, '--disallowedTools', DISALLOW]  # .cmd shim needs cmd.exe
+    # A native .exe (or a Unix binary) can be spawned directly; only a Windows .cmd/.ps1
+    # shim must go through cmd.exe, because pywinpty cannot exec a batch file.
+    if os.name == 'nt' and not claude.lower().endswith('.exe'):
+        argv = ['cmd.exe', '/c', claude, '--disallowedTools', DISALLOW]
     else:
         argv = [claude, '--disallowedTools', DISALLOW]
     print('scheduled-refresh: spawning interactive Claude (tools disabled)...')

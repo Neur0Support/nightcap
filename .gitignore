@@ -4,3 +4,7 @@ usage-snapshot.json
 node_modules/
 .DS_Store
 Thumbs.db
+
+# python bytecode cache
+__pycache__/
+*.pyc

@@ -92,6 +92,8 @@ cron, on macOS/Linux:
 
 If the machine sleeps, also tick "Wake the computer to run this task" (Task Scheduler → Conditions). Needs `statusline.js` active in your Claude settings, Claude logged in, and on Windows `pip install pywinpty`. **The Windows path is verified; the Unix path is best-effort and unconfirmed** (a good contribution if you run macOS or Linux). Either way Nightcap fails closed, so a refresh that doesn't fire just means the next run stands down.
 
+**If the scheduled run logs `claude not found` but it works from your shell:** your npm-global `claude` shim is virtualized away from the task. Bin shims (`claude`, `claude.cmd`, `claude.ps1`) installed or run under a packaged context (e.g. an MSIX terminal) carry an AppContainer SID and are invisible to a plain scheduled task — it sees only `node_modules`. `scheduled-refresh.py` auto-targets the real binary at `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe`; if your layout differs, set `NIGHTCAP_CLAUDE_BIN` to the full path of your Claude executable. Also point the task at `python` by **absolute path** (not bare `python.exe`, which Task Scheduler may fail to resolve), and capture stdout/stderr to a log so a failure says why instead of vanishing.
+
 ## Beyond Claude Code
 
 The controller doesn't know what Claude is. It reads a snapshot, `{ captured_at, seven_day: { used_percentage } }`, and maps a number to bands. Any agent works once something writes that snapshot. `statusline.js` is just the Claude Code adapter.
