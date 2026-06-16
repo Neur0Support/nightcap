@@ -29,7 +29,9 @@ Nightcap is the opposite. It reads one number, your rolling 7-day Claude usage, 
 | 75 to 90% | throttle | Light: one lane, base model |
 | over 90% | stop | Nothing. Protect tomorrow's sessions |
 
-If the reading is missing, too fresh (you're still working), or more than 12 hours old, Nightcap **fails closed** and does not run. It never gates on a budget it can't trust.
+If the reading is missing or more than 12 hours old, Nightcap **fails closed** and does not run. It never gates on a budget it can't trust.
+
+**Are you actually away?** "The snapshot looks fresh, so you must be working" is a weak proxy — the snapshot only updates when the status line renders in a terminal session, so a late night in the desktop app, a browser, or another project is invisible to it, and a stale-but-frozen snapshot can read as idle and fire the agent on top of your live work. So when it can, Nightcap checks **real OS input-idle** instead — your last keyboard or mouse activity in *any* app — and lets that decide; snapshot freshness is only the fallback when the idle probe can't read. Windows is verified (`GetLastInputInfo`); macOS (`ioreg`) and Linux (`xprintidle`) are best-effort — a PR confirming them is welcome. Either way a missing probe just falls back, and the 12-hour fail-closed backstop always holds.
 
 ## The catch, and the workaround
 
@@ -70,6 +72,21 @@ python3 nightcap.py      # -> "run: surplus band, big model"   (or "skip: ...")
 **3. Branch on the answer.** Launch your agent with the band and model it returns, or stand down if it says `skip`.
 
 Every threshold is a parameter or env var (`SURPLUS_BELOW`, `THROTTLE_ABOVE`, `CEILING`, `STALE_MAX_H`, `STALE_MIN`). Defaults match the table above.
+
+## One gotcha: don't get billed against credits
+
+Nightcap's whole premise is spending your *subscription* surplus. That premise breaks **silently** if your overnight job inherits an `ANTHROPIC_API_KEY`. A user-scope key **overrides** the OAuth subscription, so `claude` bills your Anthropic **Console credits** (real money) instead of the Max/Pro window Nightcap reads. The controller happily sees the untouched subscription %, while your credit balance drains and the run dies with `Credit balance is too low`.
+
+If your overnight `claude` job runs under a scheduler that carries that key, clear it in the launcher process before you invoke Claude. This is process-local — your persistent setting is untouched:
+
+```bash
+unset ANTHROPIC_API_KEY                                            # bash
+```
+```powershell
+Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue  # PowerShell
+```
+
+`scheduled-refresh.py` already does this for its own process. If a night ever fails on an *auth* error (not credits) after clearing the key, set up a long-lived subscription token with `claude setup-token`.
 
 ## Keeping it fed (unattended)
 

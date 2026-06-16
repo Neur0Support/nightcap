@@ -117,6 +117,13 @@ def spawn(argv, cwd):
 
 
 def main():
+    # Bill the subscription, not Console credits. A user-scope ANTHROPIC_API_KEY
+    # OVERRIDES the OAuth subscription, so Claude bills Anthropic Console credits
+    # (real money) instead of the Max/Pro window. Clear it for THIS process only
+    # (your persistent setting is untouched) so the refresh draws on the
+    # subscription -- the window Nightcap actually reads.
+    os.environ.pop('ANTHROPIC_API_KEY', None)
+
     before_cap, _ = read_snap()
     claude = find_claude()
     if not claude:

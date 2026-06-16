@@ -10,6 +10,8 @@ NIGHTCAP_CEILING, NIGHTCAP_SURPLUS_BELOW, NIGHTCAP_THROTTLE_ABOVE.
 """
 import json
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -31,6 +33,43 @@ def run(band, model):
     sys.exit(0)
 
 
+def os_idle_minutes():
+    """Real OS input-idle (last keyboard/mouse activity, any app), in minutes.
+
+    A far better "are you actually away?" signal than the snapshot's freshness.
+    Returns None if it can't read -- the caller then falls back to the freshness
+    proxy. Windows is verified; macOS (ioreg) and Linux (xprintidle) are
+    best-effort and UNCONFIRMED -- a PR confirming them is welcome. Any failure
+    returns None, so a wrong guess never fires the agent.
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _LII(ctypes.Structure):
+                _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+            lii = _LII()
+            lii.cbSize = ctypes.sizeof(_LII)
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+                return None
+            tick = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+            return ((tick - lii.dwTime) & 0xFFFFFFFF) / 60000.0   # 32-bit wrap-safe
+        if sys.platform == "darwin":
+            import re
+            out = subprocess.run(["ioreg", "-c", "IOHIDSystem"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', out)
+            return int(m.group(1)) / 1e9 / 60.0 if m else None   # nanoseconds -> min
+        exe = shutil.which("xprintidle")                          # Linux (X11)
+        if exe:
+            out = subprocess.run([exe], capture_output=True, text=True, timeout=5).stdout
+            return int(out.strip()) / 60000.0                     # ms -> minutes
+        return None
+    except Exception:
+        return None
+
+
 # fail closed: no trustworthy reading -> do not run
 if not os.path.exists(SNAPSHOT):
     skip("no snapshot yet")
@@ -47,8 +86,17 @@ try:
 except Exception:
     skip("snapshot timestamp unreadable")
 
-if age_min < STALE_MIN:
-    skip(f"you look active ({age_min:.0f}m old)")
+# activity: real OS idle owns this when we can read it. Snapshot freshness is a
+# WEAK proxy -- it only moves when the status line renders in a terminal session,
+# so a late night in the desktop app, a browser, or another project is invisible,
+# and a stale-but-frozen snapshot can read as "idle" and fire on your live work.
+idle = os_idle_minutes()
+if idle is not None:
+    if idle < STALE_MIN:
+        skip(f"you're active ({idle:.0f}m real idle)")
+    # real idle says you're away -> trust it; a fresh snapshot is good budget data
+elif age_min < STALE_MIN:
+    skip(f"you look active ({age_min:.0f}m old, no real-idle probe)")   # proxy fallback
 if age_min > STALE_MAX_H * 60:
     skip(f"snapshot {age_min / 60:.1f}h old, failing closed")
 
